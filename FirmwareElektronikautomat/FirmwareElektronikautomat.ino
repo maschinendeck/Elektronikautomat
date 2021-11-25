@@ -1,11 +1,17 @@
+#include "config.h"
+
 #include <Arduino.h>
 #include <FastLED.h>
+
+// MQTT
+#include <WiFi.h>
+#include <PubSubClient.h>
 
 // PIN Definitions
 const int pin_IRSensor_SDO = 19;
 const int pin_IRSensor_CLK = 18;
 const int pin_IRSensor_Latch = 5;
-const int pin_IRSensor_Value = 34;
+const int pin_IRSensor_Value = 34; // GPIO32-GPIO39 für analogeingänge
 const int pin_WS2812 = 23;
 
 // LED Definitions
@@ -22,17 +28,22 @@ const int IRMeasurementTimePerSlot = 10;
 const int ShiftOutUs = 10;
 const int EmptySlotTreshold = 1000; // Analog value
 
-volatile bool slotEmpty[16] = { false };
+volatile bool slotEmpty[10] = { false };
 
 CRGB leds[numLEDs];
 
 // Task Definitions
 void TaskIRSensors( void *pvParameters );
 void TaskWS2812( void *pvParameters );
+void TaskWiFi( void *pvParameters );
 void TaskDiagnostics( void *pvParameters );
 
 // Task Handles
-TaskHandle_t hTaskIRSensors, hTaskWS2812;
+TaskHandle_t hTaskIRSensors, hTaskWS2812, hTaskWiFi;
+
+// MQTT Classes
+WiFiClient wifiClient;
+PubSubClient mqttClient(wifiClient);
 
 // the setup function runs once when you press reset or power the board
 void setup() {
@@ -56,6 +67,14 @@ void setup() {
     ,  NULL // priority
     ,  2 // Priority
     ,  &hTaskWS2812); // Handle
+
+  xTaskCreate(
+    TaskWiFi
+    ,  "TaskWiFi"   // A name just for humans
+    ,  10000  // This stack size can be checked & adjusted by reading the Stack Highwater
+    ,  NULL // priority
+    ,  2 // Priority
+    ,  &hTaskWiFi); // Handle
 
   xTaskCreate(
     TaskDiagnostics
@@ -168,6 +187,51 @@ void TaskWS2812(void *pvParameters)
   }
 }
 
+void TaskWiFi(void *pvParameters)
+{
+  (void) pvParameters;
+  char buf[32];
+  bool firstRun = false;
+  bool previousSlotValues[10] = { false };
+
+  // Connect to Wifi
+  WiFi.begin(wifiSSID, wifiPSK);
+  while (WiFi.status() != WL_CONNECTED)
+    vTaskDelay(500 / portTICK_PERIOD_MS);
+  Serial.print("WiFi connected: ");
+  Serial.println(WiFi.localIP());
+
+  // Initialize MQTT Client
+  mqttClient.setServer(MQTT_Server, MQTT_Port);
+
+  for (;;)
+  {
+    // reconnect if not connected
+    while (!mqttClient.connected()) {
+      Serial.println("Reconnecting MQTT...");
+      if (mqttClient.connect("ESP32Client")) {
+        //mqttClient.subscribe("esp32/output");
+      } else {
+        vTaskDelay(5000 / portTICK_PERIOD_MS);
+      }
+    }
+
+    // publish values if changed
+    for (int i = 0; i < 10; i++)
+    {
+      if ((firstRun || (slotEmpty[i] != previousSlotValues[i])) &&
+        snprintf(buf, sizeof(buf)/sizeof(char), "elektronikautomat/slot%dEmpty", i+1))
+      {
+        mqttClient.publish(buf, slotEmpty[i] ? "1" : "0");
+        previousSlotValues[i] = slotEmpty[i];
+      }
+    }
+    firstRun = false;
+
+    vTaskDelay(MQTT_PushInterval / portTICK_PERIOD_MS);
+  }
+}
+
 void TaskDiagnostics(void *pvParameters)
 {
   (void) pvParameters;
@@ -179,6 +243,8 @@ void TaskDiagnostics(void *pvParameters)
     Serial.print(uxTaskGetStackHighWaterMark(hTaskIRSensors));
     Serial.print(", TaskWS2812: ");
     Serial.print(uxTaskGetStackHighWaterMark(hTaskWS2812));
+    Serial.print(", TaskWiFi: ");
+    Serial.print(uxTaskGetStackHighWaterMark(hTaskWiFi));
     Serial.print(", Diagnostics: ");
     Serial.println(uxTaskGetStackHighWaterMark(NULL));
     
