@@ -15,9 +15,9 @@ const int pin_IRSensor_Value = 34; // GPIO32-GPIO39 für analogeingänge
 const int pin_WS2812 = 23;
 
 // LED Definitions
-const int numLEDs = 60;
+const int numLEDs = 127;
 const int ledBrightness = 50;
-const int ledMaxCurrent = 1000; // max Strom in mA
+const int ledMaxCurrent = 3000; // max Strom in mA
 const int numSlotStatusLEDs = 3;
 const int slotLEDIndices[] = { 3, 8, 13, 21 };
 
@@ -67,14 +67,14 @@ void setup() {
     ,  NULL // priority
     ,  2 // Priority
     ,  &hTaskWS2812); // Handle
-
+/*
   xTaskCreate(
     TaskWiFi
     ,  "TaskWiFi"   // A name just for humans
     ,  10000  // This stack size can be checked & adjusted by reading the Stack Highwater
     ,  NULL // priority
     ,  2 // Priority
-    ,  &hTaskWiFi); // Handle
+    ,  &hTaskWiFi); // Handle*/
 
   xTaskCreate(
     TaskDiagnostics
@@ -172,13 +172,14 @@ void TaskWS2812(void *pvParameters)
                  numLEDs/*led count*/, 
                  startingHue /*starting hue*/);
 
+    /*
     for (int i = 0; i < sizeof(slotLEDIndices)/sizeof(slotLEDIndices[0]); i++)
     {
       for (int j = 0; j < numSlotStatusLEDs; j++)
       {
         leds[slotLEDIndices[i]+j] = slotEmpty[i] ? CRGB::Red : CRGB::Green;
       }
-    }
+    }*/
 
     FastLED.show();
     startingHue++;
@@ -243,8 +244,8 @@ void TaskDiagnostics(void *pvParameters)
     Serial.print(uxTaskGetStackHighWaterMark(hTaskIRSensors));
     Serial.print(", TaskWS2812: ");
     Serial.print(uxTaskGetStackHighWaterMark(hTaskWS2812));
-    Serial.print(", TaskWiFi: ");
-    Serial.print(uxTaskGetStackHighWaterMark(hTaskWiFi));
+    //Serial.print(", TaskWiFi: ");
+    //Serial.print(uxTaskGetStackHighWaterMark(hTaskWiFi));
     Serial.print(", Diagnostics: ");
     Serial.println(uxTaskGetStackHighWaterMark(NULL));
     
