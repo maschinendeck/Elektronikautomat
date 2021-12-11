@@ -18,44 +18,58 @@ const int pin_WS2812 = 23;
 const int numLEDs = 127;
 const int ledBrightness = 50;
 const int ledMaxCurrent = 3000; // max Strom in mA
-const int numSlotStatusLEDs = 3;
-const int slotLEDIndices[] = { 3, 8, 13, 21 };
 
 // IR Sensor Definitions
 const int IRSensorInterval = 500;
-const int IRSensorChannels = 16;
-const int IRMeasurementTimePerSlot = 10;
+const int IRSensorChannels = 10;
+const int IRMeasurementTimePerSlot = 20;
 const int ShiftOutUs = 10;
-const int EmptySlotTreshold = 1000; // Analog value
+const int EmptySlotTreshold = 500; // Analog value
 
-volatile bool slotEmpty[10] = { false };
+// Slot Sensors
+const int slotLEDIndices[IRSensorChannels] = { 59, 55, 51, 47, 43 };
+const int numSlotStatusLEDs = 4;
+volatile bool slotEmpty[IRSensorChannels] = { false };
 
 CRGB leds[numLEDs];
 
 // Task Definitions
 void TaskIRSensors( void *pvParameters );
 void TaskWS2812( void *pvParameters );
-void TaskWiFi( void *pvParameters );
+//void TaskWiFi( void *pvParameters );
 void TaskDiagnostics( void *pvParameters );
 
 // Task Handles
 TaskHandle_t hTaskIRSensors, hTaskWS2812, hTaskWiFi;
 
 // MQTT Classes
+void callback(char* topic, byte* payload, unsigned int length);
 WiFiClient wifiClient;
-PubSubClient mqttClient(wifiClient);
+PubSubClient mqttClient(MQTT_Server, MQTT_Port, callback, wifiClient);
+
+// MQTT Callback
+void callback(char* topic, byte* payload, unsigned int length) {
+  // handle message arrived
+}
+
 
 // the setup function runs once when you press reset or power the board
 void setup() {
   
   // initialize serial communication at 115200 bits per second:
   Serial.begin(115200);
+
+  // Initialize LEDS
+  pinMode(pin_WS2812, OUTPUT);
+  FastLED.addLeds<WS2812B,pin_WS2812>(leds, numLEDs).setCorrection(TypicalLEDStrip);
+  FastLED.setBrightness(ledBrightness);
+  FastLED.setMaxPowerInVoltsAndMilliamps(5,ledMaxCurrent); 
   
   // Task Setup
   xTaskCreate(
     TaskIRSensors
     ,  "TaskIRSensors"   // A name just for humans
-    ,  1024  // This stack size can be checked & adjusted by reading the Stack Highwater
+    ,  2048  // This stack size can be checked & adjusted by reading the Stack Highwater
     ,  NULL // priority
     ,  1 // Priority
     ,  &hTaskIRSensors); // Handle
@@ -63,23 +77,23 @@ void setup() {
   xTaskCreate(
     TaskWS2812
     ,  "TaskWS2812"   // A name just for humans
-    ,  10000  // This stack size can be checked & adjusted by reading the Stack Highwater
+    ,  2048  // This stack size can be checked & adjusted by reading the Stack Highwater
     ,  NULL // priority
     ,  2 // Priority
     ,  &hTaskWS2812); // Handle
-/*
+
   xTaskCreate(
     TaskWiFi
     ,  "TaskWiFi"   // A name just for humans
-    ,  10000  // This stack size can be checked & adjusted by reading the Stack Highwater
+    ,  4096  // This stack size can be checked & adjusted by reading the Stack Highwater
     ,  NULL // priority
     ,  2 // Priority
-    ,  &hTaskWiFi); // Handle*/
+    ,  &hTaskWiFi); // Handle
 
   xTaskCreate(
     TaskDiagnostics
     ,  "TaskDiagnostics"   // A name just for humans
-    ,  1024  // This stack size can be checked & adjusted by reading the Stack Highwater
+    ,  2048  // This stack size can be checked & adjusted by reading the Stack Highwater
     ,  NULL // priority
     ,  0 // Priority
     ,  NULL); // Handle
@@ -127,6 +141,11 @@ void TaskIRSensors(void *pvParameters)
     digitalWrite(pin_IRSensor_Latch, LOW);
     digitalWrite(pin_IRSensor_SDO, LOW);
 
+    // Debugdaten
+    Serial.print("Background: ");
+    Serial.print(backgroundValue);
+    Serial.print(" Sensors: ");
+
     for (int i = 0; i < IRSensorChannels; i++)
     {
       // Samplezeit warten
@@ -134,7 +153,7 @@ void TaskIRSensors(void *pvParameters)
   
       // Messwert lesen
       sensorValue = analogRead(pin_IRSensor_Value);
-      slotEmpty[i] = (sensorValue - backgroundValue) < EmptySlotTreshold;
+      slotEmpty[i] = (sensorValue - backgroundValue) > EmptySlotTreshold;
 
       // Nächster Kanal
       digitalWrite(pin_IRSensor_CLK, HIGH);
@@ -143,13 +162,19 @@ void TaskIRSensors(void *pvParameters)
       digitalWrite(pin_IRSensor_Latch, HIGH);
       delayMicroseconds(ShiftOutUs);
       digitalWrite(pin_IRSensor_Latch, LOW);
+
+      // Debugdaten
+      Serial.print(sensorValue);
+      Serial.print(", ");
     }
 
-    /*for (int i = 0; i < 16; i++)
+    
+    /*Serial.print(" Digital: ");
+    for (int i = 0; i < IRSensorChannels; i++)
     {
-      Serial.print(sensorValues[i] ? "1" : "0");
-    }
-    Serial.println();*/
+      Serial.print(slotEmpty[i] ? "1" : "0");
+    }*/
+    Serial.println();
     
     vTaskDelay(IRSensorInterval / portTICK_PERIOD_MS);  // one tick delay (15ms) in between reads for stability
   }
@@ -158,12 +183,6 @@ void TaskIRSensors(void *pvParameters)
 void TaskWS2812(void *pvParameters)
 {
   (void) pvParameters;
-
-  pinMode(pin_WS2812, OUTPUT);
-
-  FastLED.addLeds<WS2812B,pin_WS2812>(leds, numLEDs).setCorrection(TypicalLEDStrip);
-  FastLED.setBrightness(ledBrightness);
-  FastLED.setMaxPowerInVoltsAndMilliamps(5,ledMaxCurrent); 
   uint8_t startingHue = 0;
 
   for (;;)
@@ -172,14 +191,14 @@ void TaskWS2812(void *pvParameters)
                  numLEDs/*led count*/, 
                  startingHue /*starting hue*/);
 
-    /*
+    
     for (int i = 0; i < sizeof(slotLEDIndices)/sizeof(slotLEDIndices[0]); i++)
     {
       for (int j = 0; j < numSlotStatusLEDs; j++)
       {
         leds[slotLEDIndices[i]+j] = slotEmpty[i] ? CRGB::Red : CRGB::Green;
       }
-    }*/
+    }
 
     FastLED.show();
     startingHue++;
@@ -188,12 +207,13 @@ void TaskWS2812(void *pvParameters)
   }
 }
 
+
 void TaskWiFi(void *pvParameters)
 {
   (void) pvParameters;
   char buf[32];
   bool firstRun = false;
-  bool previousSlotValues[10] = { false };
+  bool previousSlotValues[IRSensorChannels] = { false };
 
   // Connect to Wifi
   WiFi.begin(wifiSSID, wifiPSK);
@@ -202,27 +222,28 @@ void TaskWiFi(void *pvParameters)
   Serial.print("WiFi connected: ");
   Serial.println(WiFi.localIP());
 
-  // Initialize MQTT Client
-  mqttClient.setServer(MQTT_Server, MQTT_Port);
 
   for (;;)
   {
     // reconnect if not connected
     while (!mqttClient.connected()) {
       Serial.println("Reconnecting MQTT...");
-      if (mqttClient.connect("ESP32Client")) {
+      if (mqttClient.connect("esp32", MQTT_User, MQTT_Pass)) {
         //mqttClient.subscribe("esp32/output");
+        Serial.println("MQTT connected!");
       } else {
         vTaskDelay(5000 / portTICK_PERIOD_MS);
       }
     }
 
     // publish values if changed
-    for (int i = 0; i < 10; i++)
+    for (int i = 0; i < IRSensorChannels; i++)
     {
       if ((firstRun || (slotEmpty[i] != previousSlotValues[i])) &&
         snprintf(buf, sizeof(buf)/sizeof(char), "elektronikautomat/slot%dEmpty", i+1))
       {
+        Serial.print("Publish to: ");
+        Serial.println(buf);
         mqttClient.publish(buf, slotEmpty[i] ? "1" : "0");
         previousSlotValues[i] = slotEmpty[i];
       }
@@ -236,16 +257,16 @@ void TaskWiFi(void *pvParameters)
 void TaskDiagnostics(void *pvParameters)
 {
   (void) pvParameters;
-  char buf[1024];
 
   for (;;)
   {
-    Serial.print("Task Highwater Marks: TaskIRSensors: ");
+    Serial.print("Task Highwater Marks: ");
+    Serial.print("TaskIRSensors: ");
     Serial.print(uxTaskGetStackHighWaterMark(hTaskIRSensors));
     Serial.print(", TaskWS2812: ");
     Serial.print(uxTaskGetStackHighWaterMark(hTaskWS2812));
-    //Serial.print(", TaskWiFi: ");
-    //Serial.print(uxTaskGetStackHighWaterMark(hTaskWiFi));
+    Serial.print(", TaskWiFi: ");
+    Serial.print(uxTaskGetStackHighWaterMark(hTaskWiFi));
     Serial.print(", Diagnostics: ");
     Serial.println(uxTaskGetStackHighWaterMark(NULL));
     
