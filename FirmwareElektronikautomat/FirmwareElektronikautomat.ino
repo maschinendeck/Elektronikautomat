@@ -12,12 +12,16 @@ const int pin_IRSensor_SDO = 19;
 const int pin_IRSensor_CLK = 18;
 const int pin_IRSensor_Latch = 5;
 const int pin_IRSensor_Value = 34; // GPIO32-GPIO39 für analogeingänge
-const int pin_WS2812 = 23;
+const int pin_WS2812_Front = 23;
+const int pin_WS2812_Bottom = 22;
 
 // LED Definitions
-const int numLEDs = 127;
-const int ledBrightness = 50;
-const int ledMaxCurrent = 3000; // max Strom in mA
+const int numLEDsFront = 127;
+const int ledBrightnessFront = 50;
+const int ledMaxCurrentFront = 2000; // max Strom in mA
+const int numLEDsBottom = 123;
+const int ledBrightnessBottom = 255;
+const int ledMaxCurrentBottom = 2000; // max Strom in mA
 
 // IR Sensor Definitions
 const int IRSensorInterval = 500;
@@ -27,11 +31,12 @@ const int ShiftOutUs = 10;
 const int EmptySlotTreshold = 500; // Analog value
 
 // Slot Sensors
-const int slotLEDIndices[IRSensorChannels] = { 59, 55, 51, 47, 43 };
+const int slotLEDIndices[IRSensorChannels] = { 59, 55, 51, 47, 43, 39, 35, 31, 27, 23 };
 const int numSlotStatusLEDs = 4;
 volatile bool slotEmpty[IRSensorChannels] = { false };
 
-CRGB leds[numLEDs];
+CRGB ledsFront[numLEDsFront];
+CRGB ledsBottom[numLEDsBottom];
 
 // Task Definitions
 void TaskIRSensors( void *pvParameters );
@@ -60,10 +65,14 @@ void setup() {
   Serial.begin(115200);
 
   // Initialize LEDS
-  pinMode(pin_WS2812, OUTPUT);
-  FastLED.addLeds<WS2812B,pin_WS2812>(leds, numLEDs).setCorrection(TypicalLEDStrip);
-  FastLED.setBrightness(ledBrightness);
-  FastLED.setMaxPowerInVoltsAndMilliamps(5,ledMaxCurrent); 
+  pinMode(pin_WS2812_Front, OUTPUT);
+  FastLED.addLeds<WS2812B,pin_WS2812_Front>(ledsFront, numLEDsFront).setCorrection(TypicalLEDStrip);
+  FastLED.setBrightness(ledBrightnessFront);
+  FastLED.setMaxPowerInVoltsAndMilliamps(5,ledMaxCurrentFront); 
+  pinMode(pin_WS2812_Bottom, OUTPUT);
+  FastLED.addLeds<WS2812B,pin_WS2812_Bottom>(ledsBottom, numLEDsBottom).setCorrection(TypicalLEDStrip);
+  FastLED.setBrightness(ledBrightnessBottom);
+  FastLED.setMaxPowerInVoltsAndMilliamps(5,ledMaxCurrentBottom); 
   
   // Task Setup
   xTaskCreate(
@@ -185,23 +194,32 @@ void TaskWS2812(void *pvParameters)
   (void) pvParameters;
   uint8_t startingHue = 0;
 
+  float phi = 0.0;
+
   for (;;)
   {
-    fill_rainbow(leds, 
-                 numLEDs/*led count*/, 
+    fill_rainbow(ledsFront, 
+                 numLEDsFront/*led count*/, 
                  startingHue /*starting hue*/);
 
+    uint8_t brightness = (sin(phi)+1.0)/2.0*((float)ledBrightnessBottom);
+    fill_solid(ledsBottom, 
+                 numLEDsBottom/*led count*/, 
+                 CRGB(0, 0, brightness));
     
     for (int i = 0; i < sizeof(slotLEDIndices)/sizeof(slotLEDIndices[0]); i++)
     {
       for (int j = 0; j < numSlotStatusLEDs; j++)
       {
-        leds[slotLEDIndices[i]+j] = slotEmpty[i] ? CRGB::Red : CRGB::Green;
+        ledsFront[slotLEDIndices[i]+j] = (slotEmpty[i] ? CRGB::Red : CRGB::Green);
       }
     }
 
     FastLED.show();
     startingHue++;
+    phi += 0.015;
+    if (phi > 360.0)
+      phi = 0.0;
 
     vTaskDelay(10 / portTICK_PERIOD_MS);
   }
