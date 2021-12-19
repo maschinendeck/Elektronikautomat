@@ -3,6 +3,8 @@
 #include <Arduino.h>
 #include <FastLED.h>
 
+#define IR_SENSOR_NOT_IMPLEMENTED
+
 // MQTT
 #include <WiFi.h>
 #include <PubSubClient.h>
@@ -17,11 +19,12 @@ const int pin_WS2812_Bottom = 22;
 
 // LED Definitions
 const int numLEDsFront = 127;
-const int ledBrightnessFront = 50;
-const int ledMaxCurrentFront = 2000; // max Strom in mA
+const int ledBrightnessFront = 100;
+const int ledMaxCurrent = 4000; // max Strom in mA
 const int numLEDsBottom = 123;
 const int ledBrightnessBottom = 255;
-const int ledMaxCurrentBottom = 2000; // max Strom in mA
+
+const int LED_ANIMATION_FPS = 60;
 
 // IR Sensor Definitions
 const int IRSensorInterval = 500;
@@ -37,6 +40,7 @@ volatile bool slotEmpty[IRSensorChannels] = { false };
 
 CRGB ledsFront[numLEDsFront];
 CRGB ledsBottom[numLEDsBottom];
+CLEDController *frontController, *bottomController;
 
 // Task Definitions
 void TaskIRSensors( void *pvParameters );
@@ -57,6 +61,7 @@ void callback(char* topic, byte* payload, unsigned int length) {
   // handle message arrived
 }
 
+#include "animations.h" // TODO: better implementation
 
 // the setup function runs once when you press reset or power the board
 void setup() {
@@ -66,14 +71,11 @@ void setup() {
 
   // Initialize LEDS
   pinMode(pin_WS2812_Front, OUTPUT);
-  FastLED.addLeds<WS2812B,pin_WS2812_Front>(ledsFront, numLEDsFront).setCorrection(TypicalLEDStrip);
-  FastLED.setBrightness(ledBrightnessFront);
-  FastLED.setMaxPowerInVoltsAndMilliamps(5,ledMaxCurrentFront); 
   pinMode(pin_WS2812_Bottom, OUTPUT);
-  FastLED.addLeds<WS2812B,pin_WS2812_Bottom>(ledsBottom, numLEDsBottom).setCorrection(TypicalLEDStrip);
-  FastLED.setBrightness(ledBrightnessBottom);
-  FastLED.setMaxPowerInVoltsAndMilliamps(5,ledMaxCurrentBottom); 
-  
+  frontController = &FastLED.addLeds<WS2812B,pin_WS2812_Front,GRB>(ledsFront, numLEDsFront).setCorrection(TypicalLEDStrip);
+  bottomController = &FastLED.addLeds<WS2812B,pin_WS2812_Bottom,GRB>(ledsBottom, numLEDsBottom).setCorrection(TypicalLEDStrip);
+  FastLED.setMaxPowerInVoltsAndMilliamps(5,ledMaxCurrent);
+
   // Task Setup
   xTaskCreate(
     TaskIRSensors
@@ -162,7 +164,7 @@ void TaskIRSensors(void *pvParameters)
   
       // Messwert lesen
       sensorValue = analogRead(pin_IRSensor_Value);
-      slotEmpty[i] = (sensorValue - backgroundValue) > EmptySlotTreshold;
+      slotEmpty[i] = (sensorValue - backgroundValue) < EmptySlotTreshold;
 
       // Nächster Kanal
       digitalWrite(pin_IRSensor_CLK, HIGH);
@@ -194,34 +196,33 @@ void TaskWS2812(void *pvParameters)
   (void) pvParameters;
   uint8_t startingHue = 0;
 
-  float phi = 0.0;
-
   for (;;)
   {
     fill_rainbow(ledsFront, 
                  numLEDsFront/*led count*/, 
                  startingHue /*starting hue*/);
 
-    uint8_t brightness = (sin(phi)+1.0)/2.0*((float)ledBrightnessBottom);
-    fill_solid(ledsBottom, 
-                 numLEDsBottom/*led count*/, 
-                 CRGB(0, 0, brightness));
+    // Bottom Fire animation
+    Fire();
     
     for (int i = 0; i < sizeof(slotLEDIndices)/sizeof(slotLEDIndices[0]); i++)
     {
       for (int j = 0; j < numSlotStatusLEDs; j++)
       {
+#ifdef IR_SENSOR_NOT_IMPLEMENTED
+        ledsFront[slotLEDIndices[i]+j] = CRGB::Green;
+#elif
         ledsFront[slotLEDIndices[i]+j] = (slotEmpty[i] ? CRGB::Red : CRGB::Green);
+#endif
       }
     }
 
-    FastLED.show();
-    startingHue++;
-    phi += 0.015;
-    if (phi > 360.0)
-      phi = 0.0;
+    frontController->showLeds(ledBrightnessFront);
+    bottomController->showLeds(ledBrightnessBottom);
 
-    vTaskDelay(10 / portTICK_PERIOD_MS);
+    startingHue++;
+
+    vTaskDelay(1000 / LED_ANIMATION_FPS / portTICK_PERIOD_MS);
   }
 }
 
