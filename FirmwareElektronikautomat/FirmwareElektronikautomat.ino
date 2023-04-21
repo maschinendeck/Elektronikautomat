@@ -210,7 +210,7 @@ void TaskWS2812(void *pvParameters)
       for (int j = 0; j < numSlotStatusLEDs; j++)
       {
 #ifdef IR_SENSOR_NOT_IMPLEMENTED
-        ledsFront[slotLEDIndices[i]+j] = CRGB::Green;
+        ledsFront[slotLEDIndices[i]+j] = CRGB::White;
 #elif
         ledsFront[slotLEDIndices[i]+j] = (slotEmpty[i] ? CRGB::Red : CRGB::Green);
 #endif
