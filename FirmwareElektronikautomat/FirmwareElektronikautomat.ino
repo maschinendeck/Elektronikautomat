@@ -3,7 +3,7 @@
 #include <Arduino.h>
 #include <FastLED.h>
 
-#define IR_SENSOR_NOT_IMPLEMENTED
+//#define IR_SENSOR_NOT_IMPLEMENTED
 
 // MQTT
 #include <WiFi.h>
@@ -11,7 +11,8 @@
 
 // PIN Definitions
 const int pin_IRSensor_SDO = 19;
-const int pin_IRSensor_CLK = 18;
+const int pin_IRSensor_CLK = 18
+;
 const int pin_IRSensor_Latch = 5;
 const int pin_IRSensor_Value = 34; // GPIO32-GPIO39 für analogeingänge
 const int pin_WS2812_Front = 23;
@@ -27,16 +28,18 @@ const int ledBrightnessBottom = 255;
 const int LED_ANIMATION_FPS = 60;
 
 // IR Sensor Definitions
+const float IRSensorFilterCoeff = 0.1f;
 const int IRSensorInterval = 500;
 const int IRSensorChannels = 10;
 const int IRMeasurementTimePerSlot = 20;
-const int ShiftOutUs = 10;
-const int EmptySlotTreshold = 500; // Analog value
+const int ShiftOutUs = 20;
+const int EmptySlotTreshold = 200; // Analog value
 
 // Slot Sensors
 const int slotLEDIndices[IRSensorChannels] = { 59, 55, 51, 47, 43, 39, 35, 31, 27, 23 };
 const int numSlotStatusLEDs = 4;
 volatile bool slotEmpty[IRSensorChannels] = { false };
+float IRSensorState[IRSensorChannels] = { 0.0f };
 
 CRGB ledsFront[numLEDsFront];
 CRGB ledsBottom[numLEDsBottom];
@@ -157,14 +160,18 @@ void TaskIRSensors(void *pvParameters)
     Serial.print(backgroundValue);
     Serial.print(" Sensors: ");
 
-    for (int i = 0; i < IRSensorChannels; i++)
+    for (int i = 0; i < 5; i++) // TODO: Fix
     {
       // Samplezeit warten
       vTaskDelay(IRMeasurementTimePerSlot / portTICK_PERIOD_MS);
   
       // Messwert lesen
       sensorValue = analogRead(pin_IRSensor_Value);
-      slotEmpty[i] = (sensorValue - backgroundValue) < EmptySlotTreshold;
+      IRSensorState[i] = IRSensorState[i] * (1.0f - IRSensorFilterCoeff) + IRSensorFilterCoeff * (sensorValue - backgroundValue);
+      slotEmpty[i] = IRSensorState[i] < EmptySlotTreshold;
+
+      // nochmal warten
+      vTaskDelay(IRMeasurementTimePerSlot / portTICK_PERIOD_MS);
 
       // Nächster Kanal
       digitalWrite(pin_IRSensor_CLK, HIGH);
@@ -175,9 +182,15 @@ void TaskIRSensors(void *pvParameters)
       digitalWrite(pin_IRSensor_Latch, LOW);
 
       // Debugdaten
-      Serial.print(sensorValue);
+      Serial.print(IRSensorState[i]);
       Serial.print(", ");
     }
+
+    slotEmpty[5] = false;
+    slotEmpty[6] = false;
+    slotEmpty[7] = true;
+    slotEmpty[8] = true;
+    slotEmpty[9] = true;
 
     
     /*Serial.print(" Digital: ");
@@ -204,6 +217,7 @@ void TaskWS2812(void *pvParameters)
 
     // Bottom Fire animation
     Fire();
+
     
     for (int i = 0; i < sizeof(slotLEDIndices)/sizeof(slotLEDIndices[0]); i++)
     {
@@ -211,8 +225,8 @@ void TaskWS2812(void *pvParameters)
       {
 #ifdef IR_SENSOR_NOT_IMPLEMENTED
         ledsFront[slotLEDIndices[i]+j] = CRGB::White;
-#elif
-        ledsFront[slotLEDIndices[i]+j] = (slotEmpty[i] ? CRGB::Red : CRGB::Green);
+#else
+        ledsFront[slotLEDIndices[i]+j] = (slotEmpty[i] ? CRGB::Red : CRGB::White);
 #endif
       }
     }
